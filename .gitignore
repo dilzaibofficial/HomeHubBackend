@@ -1,0 +1,6 @@
+node_modules
+.env
+firebaseToken.json
+google-services.json
+uploads/*
+!uploads/.gitkeep
