@@ -20,8 +20,10 @@ try {
         resource_type : "auto"
     })
     // file has been successfull uploaded
-    
-    return response.url;
+
+    // Android blocks cleartext (http://) network traffic by default, which
+    // silently fails to load images - always use the https:// URL.
+    return response.secure_url;
 } catch (error) {
     fs.unlinkSync(localFilePath) // remove the locally saved temporary file as the upload operation got failed
      return null
