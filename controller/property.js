@@ -480,6 +480,13 @@ const RejectAgreement = async (req, res) => {
       return res.status(403).json({ message: "Not authorized to reject this agreement" });
     }
 
+    if (!recipientId || !recipientId.startsWith("acct_")) {
+      return res.status(400).json({
+        message:
+          "The buyer's payout account isn't set up correctly, so the escrow can't be refunded automatically. Please contact support.",
+      });
+    }
+
     // Atomically claim the "reject" action so a double-tap/retry can only
     // trigger the refund transfer once.
     const claimedAgreement = await Agreement.findOneAndUpdate(
@@ -493,19 +500,31 @@ const RejectAgreement = async (req, res) => {
         .json({ message: "This agreement has already been rejected/processed" });
     }
 
+    // Create the refund Transfer BEFORE changing the property's state, so a
+    // failed transfer (e.g. bad destination account) doesn't leave the
+    // property showing as un-rented while no money actually moved.
+    let transfer;
+    try {
+      transfer = await stripe.transfers.create(
+        {
+          amount: amount, // amount in cents
+          currency: "usd",
+          destination: recipientId, // Connected Account ID (acct_...)
+        },
+        { idempotencyKey: `reject-${agreementId}` }
+      );
+    } catch (stripeError) {
+      console.error("Stripe transfer failed on reject:", stripeError);
+      // Un-claim so this can be retried once the underlying issue is fixed.
+      await Agreement.findByIdAndUpdate(agreementId, { agreementSuccess: null });
+      return res.status(502).json({
+        message: `Refund failed: ${stripeError.message}`,
+      });
+    }
+
     property.propertySelling.agreement = false;
     property.propertySelling.agreementMaker = null;
     await property.save();
-
-    // Create a Transfer to the connected account
-    const transfer = await stripe.transfers.create(
-      {
-        amount: amount, // amount in cents
-        currency: "usd",
-        destination: recipientId, // Connected Account ID (acct_...)
-      },
-      { idempotencyKey: `reject-${agreementId}` }
-    );
 
     notifyUser(
       agreement.buyerId,
@@ -518,7 +537,7 @@ const RejectAgreement = async (req, res) => {
       .json({ message: "Agreement Rejected successfully", transfer });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: error.message || "Internal server error" });
   }
 };
 
@@ -614,6 +633,13 @@ const DealDone = async (req, res) => {
     // Verify token
     const verify = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
+    if (!recipientId || !recipientId.startsWith("acct_")) {
+      return res.status(400).json({
+        message:
+          "The owner's payout account isn't set up correctly, so this payment can't be transferred. Please contact support.",
+      });
+    }
+
     // Atomically claim this transfer: only allow it if no transfer for this
     // agreement was initiated in the last 60 seconds. This is what actually
     // stops a double-tap or a network retry from firing two real Stripe
@@ -641,7 +667,34 @@ const DealDone = async (req, res) => {
     // Find the property
     const property = await Property.findById(propertId);
     if (!property) {
+      await Agreement.findByIdAndUpdate(agreementID, { priceTransferDate: null });
       return res.status(404).json({ message: "Property not found" });
+    }
+
+    // Create the Transfer BEFORE changing the property's state, so a failed
+    // transfer (e.g. bad destination account) doesn't leave the property
+    // marked rented while no money actually moved. The idempotency key
+    // includes the lock timestamp we just claimed above, so this specific
+    // claimed attempt can safely be retried without ever double-transferring.
+    let transfer;
+    try {
+      transfer = await stripe.transfers.create(
+        {
+          amount: amount, // amount in cents
+          currency: "usd",
+          destination: recipientId, // Connected Account ID (acct_...)
+        },
+        {
+          idempotencyKey: `dealdone-${agreementID}-${claimedAgreement.priceTransferDate.getTime()}`,
+        }
+      );
+    } catch (stripeError) {
+      console.error("Stripe transfer failed on dealDone:", stripeError);
+      // Un-claim so this can be retried once the underlying issue is fixed.
+      await Agreement.findByIdAndUpdate(agreementID, { priceTransferDate: null });
+      return res.status(502).json({
+        message: `Payment failed: ${stripeError.message}`,
+      });
     }
 
     // Set the property as rented and set the deal done date
@@ -653,24 +706,7 @@ const DealDone = async (req, res) => {
     property.propertySelling.resetDueAt = new Date(
       today.getTime() + 30 * 24 * 60 * 60 * 1000
     );
-
-    // Save the updated property details
     await property.save();
-
-    // Create a Transfer to the connected account using Stripe. The
-    // idempotency key includes the lock timestamp we just claimed above,
-    // so this specific claimed attempt can safely be retried by axios/Stripe
-    // without ever double-transferring.
-    const transfer = await stripe.transfers.create(
-      {
-        amount: amount, // amount in cents
-        currency: "usd",
-        destination: recipientId, // Connected Account ID (acct_...)
-      },
-      {
-        idempotencyKey: `dealdone-${agreementID}-${claimedAgreement.priceTransferDate.getTime()}`,
-      }
-    );
 
     claimedAgreement.agreementSuccess = true;
     await claimedAgreement.save();
@@ -690,7 +726,7 @@ const DealDone = async (req, res) => {
     res.status(200).json({ message: "Deal done successfully", transfer });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: error.message || "Internal server error" });
   }
 };
 
