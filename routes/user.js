@@ -54,7 +54,7 @@ function authenticateToken(req, res, next) {
 router.route("/logout").post(logout);
 router.route("/viewProfile").post(viewProfile);
 
-router.route("/editProfile").post(editProfile);
+router.route("/editProfile").post(upload.single("profileImage"), editProfile);
 router.route("/signin").post(signIn);
 router.route("/updateNotificationToken").post(updateNotificationToken);
 router.post(

@@ -46,8 +46,12 @@ const userSchema = mongoose.Schema({
   },
   Token : {
     type :String,
+  },
+  profileImage: {
+    type: String,
+    default: null,
   }
-  
+
 });
 
 const User = mongoose.model("User", userSchema);

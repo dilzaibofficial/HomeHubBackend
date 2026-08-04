@@ -433,11 +433,8 @@ const updateNotificationToken = async (req, res) => {
 };
 
 const editProfile = async (req, res) => {
-  console.log(req.body);
   try {
-    const { id } = req.body;
-    const { bankAccount, phonenumber } = req.body;
-    console.log(id, bankAccount, phonenumber);
+    const { id, bankAccount, phonenumber } = req.body;
     // Validate input
     if (!bankAccount || !phonenumber) {
       return res
@@ -445,15 +442,24 @@ const editProfile = async (req, res) => {
         .json({ message: "Account and phone number are required" });
     }
 
+    const update = { bankAccount, phonenumber };
+
+    if (req.file) {
+      const imageUrl = await uploadOnCloudinary(req.file.path);
+      if (!imageUrl) {
+        return res.status(500).json({ message: "Failed to upload profile image" });
+      }
+      update.profileImage = imageUrl;
+    }
+
     // Find the user by ID and update
     const user = await User.findByIdAndUpdate(
       id,
-      { bankAccount, phonenumber },
+      update,
       { new: true, runValidators: true } // Return updated user
     );
 
     if (!user) {
-      console.log("a");
       return res.status(404).json({ message: "User not found" });
     }
 
