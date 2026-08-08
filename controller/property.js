@@ -164,6 +164,81 @@ const MyAgreement = async (req, res) => {
   }
 };
 
+// Owners can edit/delete their own listings, but never once a tenant has
+// an active or completed agreement on it - the tenant's expectations (and
+// the underlying escrow/rent numbers baked into that Agreement) are
+// already locked in at that point.
+const guardEditableProperty = async (req, res, requesterId) => {
+  const property = await Property.findById(req.body.propertyId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return null;
+  }
+  if (property.propertyowner.toString() !== requesterId) {
+    res.status(403).json({ message: "You can only manage your own property" });
+    return null;
+  }
+  if (property.propertySelling.agreement || property.rented) {
+    res.status(409).json({
+      message: "This property has an active or completed agreement and can't be edited or deleted.",
+    });
+    return null;
+  }
+  return property;
+};
+
+const deleteProperty = async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: "Authorization header missing" });
+  }
+  try {
+    const verify = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_TOKEN_SECRET);
+    const property = await guardEditableProperty(req, res, verify.response._id);
+    if (!property) return;
+
+    await Property.findByIdAndDelete(req.body.propertyId);
+    res.status(200).json({ message: "Property deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting property:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const editProperty = async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: "Authorization header missing" });
+  }
+  try {
+    const verify = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_TOKEN_SECRET);
+    const property = await guardEditableProperty(req, res, verify.response._id);
+    if (!property) return;
+
+    const editableFields = [
+      "title", "description", "rent", "advance", "bedroom",
+      "bathroom", "areaofhouse", "peoplesharing", "address", "bachelor",
+    ];
+    const update = {};
+    for (const field of editableFields) {
+      if (req.body[field] !== undefined) {
+        update[field] = req.body[field];
+      }
+    }
+
+    const updatedProperty = await Property.findByIdAndUpdate(
+      req.body.propertyId,
+      { $set: update },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({ message: "Property updated successfully", property: updatedProperty });
+  } catch (error) {
+    console.error("Error editing property:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 const freshRecommendation = async (req, res) => {
   try {
     // Validate input
@@ -939,4 +1014,6 @@ module.exports = {
   DealDone,
   getPropertyById,
   getAgreementPdf,
+  editProperty,
+  deleteProperty,
 };

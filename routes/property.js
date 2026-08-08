@@ -46,7 +46,9 @@ const {
   pricePaid,
   DealDone,
   getPropertyById,
-  getAgreementPdf
+  getAgreementPdf,
+  editProperty,
+  deleteProperty
 } = require("../controller/property");
 
 //Middleware for authenticating routes
@@ -86,6 +88,8 @@ router.route("/pricePaid").post(pricePaid);
 router.route("/dealDone").post(DealDone);
 router.route("/getPropertyById").post(getPropertyById);
 router.route("/agreementPdf/:agreementId").get(getAgreementPdf);
+router.route("/editProperty").post(editProperty);
+router.route("/deleteProperty").post(deleteProperty);
 
 // router.route("/issueCreated").get(authenticateToken, issueCreated); //done
 // router.route("/issueUpvote").post(authenticateToken, issueUpvote); //done
