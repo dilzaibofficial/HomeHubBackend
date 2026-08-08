@@ -17,7 +17,7 @@ Your job: answer questions about how HomeHub works, how renting/escrow/agreement
 
 const askChatbot = async (req, res) => {
   try {
-    const {message, history} = req.body;
+    const {message, history, userName} = req.body;
 
     if (!message || typeof message !== "string" || !message.trim()) {
       return res.status(400).json({ error: "A message is required." });
@@ -33,6 +33,11 @@ const askChatbot = async (req, res) => {
           .map((m) => ({ role: m.role, content: m.content.slice(0, 1000) }))
       : [];
 
+    const safeName = typeof userName === "string" ? userName.trim().slice(0, 50) : "";
+    const systemPrompt = safeName
+      ? `${SYSTEM_PROMPT}\n\nThe user's name is "${safeName}" - address them by name naturally (not in every single message, just where it reads naturally).`
+      : SYSTEM_PROMPT;
+
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -42,7 +47,7 @@ const askChatbot = async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           ...safeHistory,
           { role: "user", content: message.trim() },
         ],
