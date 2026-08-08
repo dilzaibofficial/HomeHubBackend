@@ -29,6 +29,7 @@ const stripe_routes = require("./routes/stripe");
 const credit_routes = require("./routes/credit");
 const admin_routes = require("./routes/admin");
 const notification_routes = require("./routes/notification");
+const chat_routes = require("./routes/chat");
 
 // Base Route
 app.get("/", (req, res) => {
@@ -42,6 +43,7 @@ app.use("/api/stripe", stripe_routes);
 app.use("/api/credit", credit_routes);
 app.use("/api/admin", admin_routes);
 app.use("/api/notification", notification_routes);
+app.use("/api/chat", chat_routes);
 
 // Server Start Function
 const start = async () => {
