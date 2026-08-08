@@ -8,13 +8,14 @@ app.use(cookieParser());
 const cors = require("cors");
 const { query, check, validationResult } = require("express-validator");
 const User = require("../models/user");
-const { allUser, verifyUser, allAnalytics, creditData, allProperties } = require("../controller/admin");
+const { allUser, verifyUser, allAnalytics, creditData, allProperties, fixStripeAccounts } = require("../controller/admin");
 
 router.route("/adminalluser").post(allUser);
 router.route("/verifyUser").post(verifyUser);
 router.route("/allAnalytics").post(allAnalytics);
 router.route("/creditData").post(creditData);
 router.route("/allProperties").post(allProperties);
+router.route("/fixStripeAccounts").post(fixStripeAccounts);
 
 
 module.exports = router;

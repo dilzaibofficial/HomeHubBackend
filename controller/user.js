@@ -7,6 +7,56 @@ const { uploadOnCloudinary } = require("../Utility/cloudinary");
 const VerificationToken = require("../models/verificationToken_model");
 const sendTokenMail = require("../Utility/nodemailer.js");
 
+// Pakistan isn't a supported Stripe Connect country, so real payout
+// accounts aren't an option here - this creates a workaround demo US
+// connected account (fake individual/bank details, Stripe's own test
+// values) that CAN actually receive escrow payouts and refunds. Used both
+// at signup and by the "Link Demo Payment Account" button in the app, so
+// a user whose account predates a fix (or is otherwise broken) can just
+// generate a fresh working one from their own profile screen - no manual
+// backend intervention needed.
+const createDemoStripeAccount = async (email, ip) => {
+  return stripe.accounts.create({
+    type: "custom",
+    country: "US",
+    email: email || "testuser@example.com",
+    capabilities: {
+      transfers: { requested: true },
+    },
+    // Without this, Stripe leaves the "transfers" capability permanently
+    // "inactive" (requirements.currently_due: ["business_profile.url"]) -
+    // every payout/refund Transfer to this account fails until it's set.
+    business_profile: {
+      product_description: "Residential property rental management",
+      mcc: "6513",
+    },
+    business_type: "individual",
+    individual: {
+      first_name: "John",
+      last_name: "Doe",
+      dob: { day: 1, month: 1, year: 1990 },
+      address: {
+        line1: "123 Main St",
+        city: "San Francisco",
+        state: "CA",
+        postal_code: "94111",
+      },
+      ssn_last_4: "0000", // Test SSN
+    },
+    external_account: {
+      object: "bank_account",
+      country: "US",
+      currency: "usd",
+      routing_number: "110000000", // Test routing number
+      account_number: "000123456789", // Test account number
+    },
+    tos_acceptance: {
+      date: Math.floor(Date.now() / 1000), // Accept terms of service at the current time
+      ip: ip || "127.0.0.1",
+    },
+  });
+};
+
 const createAndSendToken = async (userId, reciever) => {
   const randomToken = Math.floor(Math.random() * (99999 - 10000 + 1)) + 10000;
   const randomTokenString = String(randomToken); // Converts the number to a string
@@ -320,45 +370,7 @@ const signUp = async (req, res) => {
 
   let account;
   try {
-    account = await stripe.accounts.create({
-      type: "custom",
-      country: "US",
-      email: "testuser@example.com",
-      capabilities: {
-        transfers: { requested: true },
-      },
-      // Without this, Stripe leaves the "transfers" capability permanently
-      // "inactive" (requirements.currently_due: ["business_profile.url"]) -
-      // every payout/refund Transfer to this account fails until it's set.
-      business_profile: {
-        product_description: "Residential property rental management",
-        mcc: "6513",
-      },
-      business_type: "individual",
-      individual: {
-        first_name: "John",
-        last_name: "Doe",
-        dob: { day: 1, month: 1, year: 1990 },
-        address: {
-          line1: "123 Main St",
-          city: "San Francisco",
-          state: "CA",
-          postal_code: "94111",
-        },
-        ssn_last_4: "0000", // Test SSN
-      },
-      external_account: {
-        object: "bank_account",
-        country: "US",
-        currency: "usd",
-        routing_number: "110000000", // Test routing number
-        account_number: "000123456789", // Test account number
-      },
-      tos_acceptance: {
-        date: Math.floor(Date.now() / 1000), // Accept terms of service at the current time
-        ip: req.ip, // Provide the IP address of the user accepting the terms
-      },
-    });
+    account = await createDemoStripeAccount(req.body.email, req.ip);
   } catch (error) {
     console.error("Error creating Stripe account:", error);
     return res.status(500).json({
@@ -439,6 +451,36 @@ const updateNotificationToken = async (req, res) => {
   }
 };
 
+// Lets a user generate/regenerate their own demo payout account from
+// inside the app - covers both users who never got one and accounts
+// created before the business_profile fix (permanently stuck unable to
+// receive transfers).
+const linkPaymentAccount = async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: "Authorization header missing" });
+  }
+  try {
+    const verify = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_TOKEN_SECRET);
+    const user = await User.findById(verify.response._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const account = await createDemoStripeAccount(user.email, req.ip);
+    user.BankAountStripeId = account.id;
+    await user.save();
+
+    res.status(200).json({
+      message: "Demo payment account linked successfully",
+      BankAountStripeId: account.id,
+    });
+  } catch (error) {
+    console.error("Error linking payment account:", error);
+    res.status(500).json({ message: error.message || "Failed to link payment account" });
+  }
+};
+
 const editProfile = async (req, res) => {
   try {
     const { id, bankAccount, phonenumber } = req.body;
@@ -507,5 +549,6 @@ module.exports = {
   changeForgetPassword,
   forgetPasswordSend,
   updateNotificationToken,
+  linkPaymentAccount,
 
 };

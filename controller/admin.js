@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const Property = require("../models/property");
 const Credit = require("../models/Credit");
 const Agreement = require("../models/Agreement");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const allUser = async (req, res) => {
   try {
@@ -85,10 +86,56 @@ const allProperties = async (req, res) => {
   }
 };
 
+// One-time backfill for accounts created before the business_profile fix
+// (see user.js signUp) - those Stripe Connect accounts are permanently
+// stuck at capabilities.transfers = "inactive" and every payout/refund
+// Transfer to them fails with "insufficient_capabilities_for_transfer".
+// Patching business_profile onto the existing account (instead of asking
+// users to sign up again) activates transfers retroactively.
+const fixStripeAccounts = async (req, res) => {
+  if (req.body.secret !== process.env.ACCESS_TOKEN_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  try {
+    const users = await User.find({ BankAountStripeId: { $ne: null } });
+    const results = [];
+
+    for (const user of users) {
+      try {
+        const account = await stripe.accounts.retrieve(user.BankAountStripeId);
+        if (account.capabilities?.transfers === "active") {
+          results.push({ user: user.username, account: user.BankAountStripeId, status: "already active" });
+          continue;
+        }
+        await stripe.accounts.update(user.BankAountStripeId, {
+          business_profile: {
+            product_description: "Residential property rental management",
+            mcc: "6513",
+          },
+        });
+        const updated = await stripe.accounts.retrieve(user.BankAountStripeId);
+        results.push({
+          user: user.username,
+          account: user.BankAountStripeId,
+          status: updated.capabilities?.transfers === "active" ? "fixed" : `still not active: ${JSON.stringify(updated.requirements?.currently_due)}`,
+        });
+      } catch (err) {
+        results.push({ user: user.username, account: user.BankAountStripeId, status: `error: ${err.message}` });
+      }
+    }
+
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error("Error fixing Stripe accounts:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   allProperties,
   allUser,
   verifyUser,
   allAnalytics,
   creditData,
+  fixStripeAccounts,
 };

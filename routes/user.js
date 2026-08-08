@@ -28,7 +28,7 @@ app.use(
     origin: "*",
   })
 );
-const { signIn, signUp, editProfile, logout, viewProfile, forgetPasswordSend, handleRepeatTokenSend, VerifyToken, forgetPasswordChange, changeForgetPassword, updateNotificationToken } = require("../controller/user");
+const { signIn, signUp, editProfile, logout, viewProfile, forgetPasswordSend, handleRepeatTokenSend, VerifyToken, forgetPasswordChange, changeForgetPassword, updateNotificationToken, linkPaymentAccount } = require("../controller/user");
 
 function authenticateToken(req, res, next) {
   const authtoken = req.cookies.jwt;
@@ -57,6 +57,7 @@ router.route("/viewProfile").post(viewProfile);
 router.route("/editProfile").post(upload.single("profileImage"), editProfile);
 router.route("/signin").post(signIn);
 router.route("/updateNotificationToken").post(updateNotificationToken);
+router.route("/linkPaymentAccount").post(linkPaymentAccount);
 router.post(
   "/signup",
   upload.array("images"),
