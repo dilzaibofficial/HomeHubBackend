@@ -129,7 +129,11 @@ const getStreamToken = async (req, res) => {
   try {
     requireAdmin(req);
     const adminUserId = process.env.ADMIN_STREAM_USER_ID;
-    await streamServerClient.upsertUser({ id: adminUserId, name: "HomeHub Support" });
+    await streamServerClient.upsertUser({
+      id: adminUserId,
+      name: "HomeHub Support",
+      image: "https://admin-eta-three-41.vercel.app/logo.png",
+    });
     const token = streamServerClient.createToken(adminUserId);
     res.status(200).json({ token, userId: adminUserId, apiKey: process.env.STREAM_API_KEY });
   } catch (error) {
