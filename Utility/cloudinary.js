@@ -10,14 +10,18 @@ cloudinary.config({
 });
 
 
-const uploadOnCloudinary = async(localFilePath) => {
+const uploadOnCloudinary = async(localFilePath, resourceType = "auto") => {
 try {
     if(!localFilePath){
         return null
     }
     //upload the file on cloudinary
     const response = await cloudinary.uploader.upload(localFilePath ,{
-        resource_type : "auto"
+        // Cloudinary now blocks direct delivery of PDFs (and other non-image
+        // documents) uploaded under "image"/"auto" resource type by default,
+        // as an anti-XSS measure - it 401s with "deny or ACL failure" on
+        // download. "raw" serves the file as-is with no such restriction.
+        resource_type : resourceType
     })
     // file has been successfull uploaded
 

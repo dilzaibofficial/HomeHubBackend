@@ -1,5 +1,6 @@
 const { default: mongoose } = require("mongoose");
 const { uploadOnCloudinary } = require("../Utility/cloudinary");
+const { buildAgreementPdf } = require("../Utility/generateAgreementPdf");
 const Property = require("../models/property");
 const jwt = require("jsonwebtoken");
 const Agreement = require("../models/Agreement");
@@ -848,6 +849,42 @@ const DealDone = async (req, res) => {
   }
 };
 
+// Streams the finalized agreement as a branded PDF, generated fresh from
+// current DB state on every request - no file storage needed. Cloudinary
+// was tried first, but it blocks direct PDF delivery under a default
+// account-level security setting ("deny or ACL failure" on download), so
+// this is served directly from our own backend instead. Deliberately
+// unauthenticated: it's opened as a raw URL from inside the Stream Chat
+// attachment UI, which can't attach an Authorization header.
+const getAgreementPdf = async (req, res) => {
+  try {
+    const { agreementId } = req.params;
+    const agreement = await Agreement.findById(agreementId);
+    if (!agreement) {
+      return res.status(404).send("Agreement not found");
+    }
+    const property = await Property.findById(agreement.PropertyId);
+    if (!property) {
+      return res.status(404).send("Property not found");
+    }
+    const owner = await User.findById(property.propertyowner);
+    const tenant = await User.findById(agreement.buyerId);
+    if (!owner || !tenant) {
+      return res.status(404).send("Owner or tenant not found");
+    }
+
+    const effectiveRent = agreement.negotationPrice ?? property.rent;
+    const pdfBuffer = await buildAgreementPdf({ property, owner, tenant, agreement, effectiveRent });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="HomeHub_Agreement_${agreementId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error("Error generating agreement PDF:", error);
+    res.status(500).send("Server error");
+  }
+};
+
 // const myProperty = async (req, res) => {
 //   try {
 //     const myData = await Property.find(
@@ -901,4 +938,5 @@ module.exports = {
   pricePaid,
   DealDone,
   getPropertyById,
+  getAgreementPdf,
 };
