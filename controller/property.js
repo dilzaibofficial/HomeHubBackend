@@ -197,6 +197,124 @@ const freshRecommendation = async (req, res) => {
   }
 };
 
+// AI-powered natural-language property matcher. The user describes what
+// they want in plain text ("2 rooms, beautiful house, 1 washroom, Clifton
+// Karachi") and this ranks real listings from the DB against it - it never
+// invents properties, it only selects/ranks from what's actually available.
+const aiRecommendProperties = async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: "Authorization header missing" });
+  }
+
+  try {
+    const token = authHeader.split(" ")[1];
+    const verify = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    const _id = verify.response._id;
+
+    const prompt = (req.body.prompt || "").trim();
+    if (!prompt) {
+      return res.status(400).json({ error: "Please describe what you're looking for." });
+    }
+    if (prompt.length > 500) {
+      return res.status(400).json({ error: "That description is too long." });
+    }
+
+    // Only recommend properties the user could actually rent: not their own,
+    // not already under an active agreement, not already rented out.
+    const candidates = await Property.find({
+      propertyowner: { $ne: _id },
+      "propertySelling.agreement": { $ne: true },
+      rented: { $ne: true },
+    })
+      .populate("propertyowner")
+      .limit(80)
+      .exec();
+
+    if (candidates.length === 0) {
+      return res.status(200).json({ results: [] });
+    }
+
+    const candidateSummaries = candidates.map((p) => ({
+      id: p._id.toString(),
+      title: p.title,
+      type: p.type,
+      bedroom: p.bedroom,
+      bathroom: p.bathroom,
+      rent: p.rent,
+      advance: p.advance,
+      areaofhouse: p.areaofhouse,
+      peoplesharing: p.peoplesharing,
+      bachelor: p.bachelor,
+      address: p.address,
+      description: (p.description || "").slice(0, 180),
+    }));
+
+    const systemPrompt = `You are the property-matching engine for HomeHub, a rental app. You are given a user's natural-language request and a JSON list of available properties. Pick and rank the properties that genuinely best satisfy the request.
+
+Rules:
+- Bedroom/bathroom counts matter most - only include properties that reasonably match the requested room counts (exact match preferred; allow +/-1 only if nothing exact exists).
+- Location is written freely in each property's "address" field. Match it loosely: if the user names a specific neighborhood/area (e.g. "Clifton") and no property's address contains it, fall back to matching the wider city named in the request (e.g. "Karachi") instead of returning nothing. If the request has no usable location or no property address matches even the city, ignore location and rank on the other criteria.
+- Use "description" and "title" text to judge softer qualities the user asks for (e.g. "beautiful", "spacious", "modern") - only credit a property for this if its own text actually supports it, never invent details.
+- Never invent or include a property id that is not in the given list.
+- Return the BEST matches first. Return at most 10 results. If truly nothing reasonably matches, return an empty results array rather than forcing bad matches.
+
+Respond ONLY with JSON in this exact shape: {"results":[{"id":"<property id>","reason":"<one short sentence>"}]} ordered best match first.`;
+
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 800,
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: `User's request: "${prompt}"\n\nAvailable properties:\n${JSON.stringify(candidateSummaries)}`,
+          },
+        ],
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      const errBody = await aiResponse.text();
+      console.error("OpenAI error (aiRecommend):", aiResponse.status, errBody);
+      return res.status(502).json({ error: "The AI matcher is temporarily unavailable. Please try again." });
+    }
+
+    const aiData = await aiResponse.json();
+    let parsed;
+    try {
+      parsed = JSON.parse(aiData.choices?.[0]?.message?.content || "{}");
+    } catch (parseErr) {
+      console.error("Failed to parse AI recommendation JSON:", aiData.choices?.[0]?.message?.content);
+      return res.status(502).json({ error: "The AI matcher returned an unexpected response. Please try again." });
+    }
+
+    const rankedIds = Array.isArray(parsed.results) ? parsed.results : [];
+    const candidateById = new Map(candidates.map((p) => [p._id.toString(), p]));
+
+    const results = rankedIds
+      .filter((r) => r && candidateById.has(r.id))
+      .slice(0, 10)
+      .map((r, index) => {
+        const property = candidateById.get(r.id).toObject();
+        return { ...property, aiRank: index + 1, aiReason: r.reason || null };
+      });
+
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error("Error in aiRecommendProperties:", error);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+};
+
 const buyerDetail = async (req, res) => {
   try {
     // Validate input
@@ -772,6 +890,7 @@ module.exports = {
   createProperty,
   myProperty,
   freshRecommendation,
+  aiRecommendProperties,
   makeAgreement,
   MyAgreement,
   agreementDetailShow,

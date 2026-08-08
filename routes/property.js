@@ -35,6 +35,7 @@ const {
   createProperty,
   myProperty,
   freshRecommendation,
+  aiRecommendProperties,
   makeAgreement,
   MyAgreement,
   buyerDetail,
@@ -72,6 +73,7 @@ const {
 router.route("/createProperty").post(upload.array("images"), createProperty);
 router.route("/findmyproperty").post(myProperty);
 router.route("/freshRecommendation").post(freshRecommendation);
+router.route("/aiRecommend").post(aiRecommendProperties);
 router.route("/makeAgreemnet").post(makeAgreement);
 router.route("/myAgreement").post(MyAgreement);
 router.route("/myBuyers").post(buyerDetail);
