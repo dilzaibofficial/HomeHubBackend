@@ -15,7 +15,9 @@ const userSchema = mongoose.Schema({
     required: true,
   },
   cnic: {
-    type: Number,
+    // Stored as String, not Number - CNIC/phone can carry leading zeros and
+    // a "+" prefix, both of which a Number field silently strips/corrupts.
+    type: String,
     required: true,
     unique: true,
   },
@@ -28,7 +30,7 @@ const userSchema = mongoose.Schema({
     default: null,
   },
   phonenumber: {
-    type: Number,
+    type: String,
     required: true,
     unique: true,
   },
