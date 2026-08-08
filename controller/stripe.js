@@ -1,10 +1,22 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
+// Pakistan isn't a supported Stripe Connect country, so every owner/tenant
+// payout account created at signup is actually a workaround US-based
+// connected account (see user.js signUp) settled in USD. If this escrow
+// PaymentIntent collected in PKR, the platform's Stripe balance would only
+// ever hold PKR, and every later payout/refund Transfer (which pulls from
+// the platform's USD balance) would fail with "insufficient balance" -
+// surfacing to users as a finalize/reject 502. Collecting in USD here,
+// using the same PKR->USD rate the transfer amounts are already computed
+// with, keeps the whole money trail in one currency end to end.
+const PKR_TO_USD = 0.0036;
+
 const payment = async (req, res) => {
   try {
+    const usdCents = Math.round(req.body.amount * PKR_TO_USD * 100);
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: req.body.amount * 100,
-      currency: "pkr",
+      amount: usdCents,
+      currency: "usd",
       automatic_payment_methods: {
         enabled: true,
       },
