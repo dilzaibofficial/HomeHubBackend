@@ -327,6 +327,13 @@ const signUp = async (req, res) => {
       capabilities: {
         transfers: { requested: true },
       },
+      // Without this, Stripe leaves the "transfers" capability permanently
+      // "inactive" (requirements.currently_due: ["business_profile.url"]) -
+      // every payout/refund Transfer to this account fails until it's set.
+      business_profile: {
+        product_description: "Residential property rental management",
+        mcc: "6513",
+      },
       business_type: "individual",
       individual: {
         first_name: "John",
