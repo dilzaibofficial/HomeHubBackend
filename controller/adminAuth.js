@@ -129,6 +129,14 @@ const getStreamToken = async (req, res) => {
   try {
     requireAdmin(req);
     const adminUserId = process.env.ADMIN_STREAM_USER_ID;
+    const missing = ["STREAM_API_KEY", "STREAM_API_SECRET", "ADMIN_STREAM_USER_ID"].filter(
+      (key) => !process.env[key]
+    );
+    if (missing.length) {
+      const err = new Error(`Missing server env var(s): ${missing.join(", ")}`);
+      err.status = 500;
+      throw err;
+    }
     await streamServerClient.upsertUser({
       id: adminUserId,
       name: "HomeHub Support",
