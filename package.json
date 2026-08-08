@@ -30,6 +30,7 @@
     "pdfkit": "^0.19.1",
     "resend": "^4.1.2",
     "sib-api-v3-sdk": "^8.5.0",
+    "stream-chat": "^9.50.2",
     "stripe": "^17.2.0"
   }
 }

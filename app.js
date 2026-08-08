@@ -5,6 +5,7 @@ const cron = require("node-cron");
 const connectDB = require("./database/connect");
 const bodyParser = require("body-parser");
 const resetExpiredAgreements = require("./Utility/resetExpiredAgreements");
+const { ensureDefaultAdmin } = require("./controller/adminAuth");
 
 const app = express();
 // Render assigns its own port via process.env.PORT - it must be used as-is.
@@ -51,6 +52,10 @@ const start = async () => {
     // Database Connection
     await connectDB();
     console.log("✅ Database Connected Successfully");
+
+    // Idempotent - creates the default admin login (admin/admin) only if
+    // no admin exists yet.
+    await ensureDefaultAdmin();
 
     // Sweep for agreements past their 30-day reset date. Runs once at
     // startup (to catch anything that expired while the server was down)
