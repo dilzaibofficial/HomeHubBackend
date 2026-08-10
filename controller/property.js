@@ -804,6 +804,10 @@ const MakeNegotationPrice = async (req, res) => {
 
     const property = await Property.findById(agreement.PropertyId);
     if (property) {
+      // Notify both sides, not just the tenant - whichever of them made this
+      // offer already knows; it's the OTHER party who needs the alert, and
+      // since either side can be the one proposing a price, the simplest
+      // correct fix is to always tell both.
       notifyUser(
         property.propertySelling.agreementMaker,
         "Negotiation Price Updated",
@@ -814,6 +818,18 @@ const MakeNegotationPrice = async (req, res) => {
           agreementId: agreement._id,
           scrollTo: "negotiation",
           forOwner: false,
+        }
+      );
+      notifyUser(
+        property.propertyowner,
+        "Negotiation Price Updated",
+        `${property.title}: the monthly rent was negotiated to Rs ${negotationPrice}.`,
+        {
+          type: "negotiation",
+          propertyId: property._id,
+          agreementId: agreement._id,
+          scrollTo: "negotiation",
+          forOwner: true,
         }
       );
     }
