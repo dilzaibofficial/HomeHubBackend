@@ -5,14 +5,32 @@ const Property = require("../models/property");
 const jwt = require("jsonwebtoken");
 const Agreement = require("../models/Agreement");
 const User = require("../models/user");
+const Notification = require("../models/Notification");
 const { sendNotification } = require("./notification");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
-// Fire-and-forget push notification - a failure here must never break the
-// caller's main flow (agreement/payment already succeeded by the time this runs).
-const notifyUser = async (userId, title, body) => {
+// Fire-and-forget notification - a failure here must never break the
+// caller's main flow (agreement/payment already succeeded by the time this
+// runs). Persists an in-app Notification (drives the notifications screen
+// and badge counts) and sends a push if the user has a device token -
+// independently, so one failing never blocks the other.
+const notifyUser = async (userId, title, body, meta = {}) => {
+  if (!userId) return;
   try {
-    if (!userId) return;
+    await Notification.create({
+      recipient: userId,
+      title,
+      body,
+      type: meta.type || "payment",
+      property: meta.propertyId || null,
+      agreement: meta.agreementId || null,
+      scrollTo: meta.scrollTo || null,
+      forOwner: !!meta.forOwner,
+    });
+  } catch (error) {
+    console.error("Error creating in-app notification:", error);
+  }
+  try {
     const user = await User.findById(userId);
     if (user && user.Token) {
       await sendNotification(user.Token, title, body);
@@ -117,6 +135,7 @@ const myProperty = async (req, res) => {
       "_id title description type rent advance bachelor state city area address assest bedroom bathroom areaofhouse propertyowner propertySelling peoplesharing coordinate rented"
     )
     .populate("propertyowner")
+    .sort({ _id: -1 })
     .exec();
 
     // Check if any data was found
@@ -148,6 +167,7 @@ const MyAgreement = async (req, res) => {
       "_id title description type rent advance bachelor state city area address assest bedroom bathroom areaofhouse propertyowner propertySelling peoplesharing coordinate rented"
     )
     .populate("propertyowner")
+    .sort({ _id: -1 })
     .exec();
 
     // Check if any data was found
@@ -411,6 +431,7 @@ const buyerDetail = async (req, res) => {
       "_id title description type rent advance bachelor state city area address assest bedroom bathroom areaofhouse propertyowner propertySelling peoplesharing coordinate rented"
     )
       .populate("propertySelling.agreementMaker")
+      .sort({ _id: -1 })
       .exec();
 
     // Check if any data was found
@@ -519,7 +540,14 @@ const makeAgreement = async (req, res) => {
     notifyUser(
       updatedProperty.propertyowner,
       "New Agreement Request",
-      `Someone wants to rent "${updatedProperty.title}".`
+      `Someone wants to rent "${updatedProperty.title}". Advance of Rs ${req.body.agreementPricePaid} is now in escrow.`,
+      {
+        type: "agreement_request",
+        propertyId: updatedProperty._id,
+        agreementId: savedAgreement._id,
+        scrollTo: "negotiation",
+        forOwner: true,
+      }
     );
 
     // Step 5: Return the updated property and agreement details
@@ -628,7 +656,14 @@ const AccceptAgreement = async (req, res) => {
       notifyUser(
         otherPartyId,
         "Agreement Update",
-        `${property.title}: the other party accepted the agreement.`
+        `${property.title}: the other party accepted the agreement. Accept your side to finalize the deal.`,
+        {
+          type: "handshake",
+          propertyId: property._id,
+          agreementId: agreement._id,
+          scrollTo: "negotiation",
+          forOwner: otherPartyId.toString() === property.propertyowner.toString(),
+        }
       );
     }
 
@@ -723,7 +758,13 @@ const RejectAgreement = async (req, res) => {
     notifyUser(
       agreement.buyerId,
       "Agreement Rejected",
-      `${property.title}: the agreement was rejected and your escrow is being refunded.`
+      `${property.title}: the agreement was rejected and your escrow of Rs ${(amount / 0.36).toFixed(0)} is being refunded.`,
+      {
+        type: "rejected",
+        propertyId: property._id,
+        agreementId: agreement._id,
+        forOwner: false,
+      }
     );
 
     res
@@ -766,7 +807,14 @@ const MakeNegotationPrice = async (req, res) => {
       notifyUser(
         property.propertySelling.agreementMaker,
         "Negotiation Price Updated",
-        `${property.title}: the negotiation price was updated to ${negotationPrice}.`
+        `${property.title}: the monthly rent was negotiated to Rs ${negotationPrice}.`,
+        {
+          type: "negotiation",
+          propertyId: property._id,
+          agreementId: agreement._id,
+          scrollTo: "negotiation",
+          forOwner: false,
+        }
       );
     }
 
@@ -891,6 +939,11 @@ const DealDone = async (req, res) => {
       });
     }
 
+    // Capture this BEFORE flipping rented to true - it's the only way to
+    // tell "first-time finalize" apart from a later monthly repay, since
+    // both go through this same endpoint and both leave rented === true.
+    const isFirstFinalize = !property.rented;
+
     // Set the property as rented and set the deal done date
     property.rented = true;
     const today = new Date();
@@ -908,13 +961,52 @@ const DealDone = async (req, res) => {
     notifyUser(
       claimedAgreement.buyerId,
       "Deal Finalized",
-      `${property.title}: your payment was transferred successfully.`
+      `${property.title}: your payment of Rs ${(amount / 0.36).toFixed(0)} was transferred successfully to the owner.`,
+      {
+        type: "payment",
+        propertyId: property._id,
+        agreementId: agreementID,
+        forOwner: false,
+      }
     );
     notifyUser(
       property.propertyowner,
       "Payment Received",
-      `${property.title}: you received a payment.`
+      `${property.title}: you received a payment of Rs ${(amount / 0.36).toFixed(0)} from the tenant.`,
+      {
+        type: "payment",
+        propertyId: property._id,
+        agreementId: agreementID,
+        forOwner: true,
+      }
     );
+
+    // The agreement PDF is only generated/relevant once, at the first
+    // finalize - not on every later monthly repay through this same endpoint.
+    if (isFirstFinalize) {
+      notifyUser(
+        claimedAgreement.buyerId,
+        "Rental Agreement Ready",
+        `${property.title}: your official HomeHub rental agreement PDF is ready to view.`,
+        {
+          type: "agreement_pdf",
+          propertyId: property._id,
+          agreementId: agreementID,
+          forOwner: false,
+        }
+      );
+      notifyUser(
+        property.propertyowner,
+        "Rental Agreement Ready",
+        `${property.title}: the official HomeHub rental agreement PDF is ready to view.`,
+        {
+          type: "agreement_pdf",
+          propertyId: property._id,
+          agreementId: agreementID,
+          forOwner: true,
+        }
+      );
+    }
 
     // Respond with success
     res.status(200).json({ message: "Deal done successfully", transfer });

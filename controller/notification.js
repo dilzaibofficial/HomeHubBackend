@@ -1,7 +1,9 @@
 const admin = require("firebase-admin");
 const { google } = require("googleapis");
 const path = require("path");
+const jwt = require("jsonwebtoken");
 const User = require("../models/user");
+const Notification = require("../models/Notification");
 
 // Initialize Firebase Admin SDK
 const firebaseConfig = path.join(__dirname, "../firebaseToken.json");
@@ -95,8 +97,70 @@ async function getAccessToken() {
     }
   }
 
+// In-app notifications list (bell icon / notifications screen), separate
+// from the FCM push helpers above - these read/write the persisted
+// Notification collection so the list survives even if a push never
+// reached the device (app closed, token stale, etc).
+function getUserIdFromAuth(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    const err = new Error("Authorization header missing");
+    err.status = 401;
+    throw err;
+  }
+  const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_TOKEN_SECRET);
+  return decoded.response._id;
+}
+
+async function listNotifications(req, res) {
+  try {
+    const userId = getUserIdFromAuth(req);
+    const notifications = await Notification.find({ recipient: userId })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .populate({ path: "property", populate: { path: "propertyowner" } });
+    res.status(200).json(notifications);
+  } catch (error) {
+    console.error("Error listing notifications:", error);
+    res.status(error.status || 500).json({ message: error.message || "Server error" });
+  }
+}
+
+async function unreadCount(req, res) {
+  try {
+    const userId = getUserIdFromAuth(req);
+    const [count, ownerCount] = await Promise.all([
+      Notification.countDocuments({ recipient: userId, read: false }),
+      Notification.countDocuments({ recipient: userId, read: false, forOwner: true }),
+    ]);
+    res.status(200).json({ count, ownerCount });
+  } catch (error) {
+    console.error("Error getting unread notification count:", error);
+    res.status(error.status || 500).json({ message: error.message || "Server error" });
+  }
+}
+
+async function markRead(req, res) {
+  try {
+    const userId = getUserIdFromAuth(req);
+    const { id } = req.body;
+    if (id) {
+      await Notification.updateOne({ _id: id, recipient: userId }, { $set: { read: true } });
+    } else {
+      await Notification.updateMany({ recipient: userId, read: false }, { $set: { read: true } });
+    }
+    res.status(200).json({ message: "Marked read" });
+  } catch (error) {
+    console.error("Error marking notification read:", error);
+    res.status(error.status || 500).json({ message: error.message || "Server error" });
+  }
+}
+
 module.exports = {
   sendNotification,
   getAccessToken,
   createNotification,
+  listNotifications,
+  unreadCount,
+  markRead,
 };

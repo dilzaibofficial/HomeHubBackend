@@ -2,6 +2,9 @@ const express = require("express");
 const {
   sendNotification,
   createNotification,
+  listNotifications,
+  unreadCount,
+  markRead,
 } = require("../controller/notification");
 const router = express.Router();
 
@@ -21,5 +24,9 @@ router.post("/send-notification", async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+router.route("/list").get(listNotifications);
+router.route("/unreadCount").get(unreadCount);
+router.route("/markRead").post(markRead);
 
 module.exports = router;
