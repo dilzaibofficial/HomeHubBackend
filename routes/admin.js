@@ -26,6 +26,7 @@ const {
   rejectVerification,
   datasetSummary,
   exportDatasetZip,
+  deleteDataset,
 } = require("../controller/adminVerification");
 
 router.route("/adminalluser").post(allUser);
@@ -52,5 +53,6 @@ router.route("/approveVerification").post(approveVerification);
 router.route("/rejectVerification").post(rejectVerification);
 router.route("/datasetSummary").post(datasetSummary);
 router.route("/exportVerificationDataset").post(exportDatasetZip);
+router.route("/deleteDataset").post(deleteDataset);
 
 module.exports = router;

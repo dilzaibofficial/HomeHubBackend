@@ -101,8 +101,34 @@ const datasetSummary = async (req, res) => {
   try {
     requireAdmin(req);
     const unexportedCount = await VerificationSample.countDocuments({ exportedAt: null, label: { $ne: null } });
-    res.status(200).json({ unexportedCount });
+    const totalCount = await VerificationSample.countDocuments({});
+    res.status(200).json({ unexportedCount, totalCount });
   } catch (error) {
+    res.status(error.status || 500).json({ message: error.message || "Server error" });
+  }
+};
+
+// Wipes every accumulated dataset sample - both the Mongo rows and their
+// extracted frame images on Cloudinary (the reference photos are NOT
+// touched here, since those are the property's own listing photos, not
+// something this feature owns). Deliberately does not touch any Property's
+// verificationStatus/video, or in-flight pending_review cases - this only
+// clears the *historical labeled dataset*, not live verification state.
+const deleteDataset = async (req, res) => {
+  try {
+    requireAdmin(req);
+
+    const samples = await VerificationSample.find({}, "matchedFramePublicId");
+    await Promise.allSettled(
+      samples
+        .filter((s) => s.matchedFramePublicId)
+        .map((s) => deleteFromCloudinary(s.matchedFramePublicId, "image"))
+    );
+
+    const result = await VerificationSample.deleteMany({});
+    res.status(200).json({ message: "Dataset deleted", deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error("Error deleting verification dataset:", error);
     res.status(error.status || 500).json({ message: error.message || "Server error" });
   }
 };
@@ -194,4 +220,5 @@ module.exports = {
   rejectVerification,
   datasetSummary,
   exportDatasetZip,
+  deleteDataset,
 };
