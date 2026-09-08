@@ -34,7 +34,21 @@ const assertOwnsProperty = async (propertyId, requesterId) => {
   return property;
 };
 
-const callMatchingService = async (property) => {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// On Render's free tier, a cold/sleeping instance makes the platform's own
+// edge return a fast 502/503 (before the container has even started up),
+// well before it actually finishes booting - a single attempt reads that as
+// "the service failed" when really it just needs a few more seconds. This
+// retries specifically on those "still waking up" signals (and on a request
+// timing out, since a slow cold boot can also just hang past the per-attempt
+// budget) with a short delay, so a request made right after idle self-heals
+// instead of forcing the user to manually retry.
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 5000;
+
+const callMatchingServiceOnce = async (property) => {
   const baseUrl = process.env.ML_VERIFICATION_SERVICE_URL;
   const secret = process.env.ML_VERIFICATION_SERVICE_SECRET;
   if (!baseUrl || !secret) {
@@ -64,7 +78,8 @@ const callMatchingService = async (property) => {
       const errBody = await response.text();
       console.error("Verification service error:", response.status, errBody);
       const err = new Error("Verification service could not process the video. Please try again.");
-      err.status = 502;
+      err.status = response.status;
+      err.retryable = RETRYABLE_STATUSES.has(response.status);
       throw err;
     }
 
@@ -73,12 +88,38 @@ const callMatchingService = async (property) => {
     if (error.name === "AbortError") {
       const err = new Error("Verification service timed out. Please try again.");
       err.status = 504;
+      err.retryable = true;
       throw err;
+    }
+    if (error.retryable === undefined) {
+      // A network-level failure (DNS, connection refused, etc.) - also
+      // worth one retry, since a cold instance can briefly refuse
+      // connections before its edge is ready to proxy at all.
+      error.retryable = true;
+      error.status = error.status || 502;
     }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+};
+
+const callMatchingService = async (property) => {
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callMatchingServiceOnce(property);
+    } catch (error) {
+      lastError = error;
+      if (!error.retryable || attempt === MAX_ATTEMPTS) break;
+      console.warn(
+        `Verification service attempt ${attempt}/${MAX_ATTEMPTS} failed (likely cold-starting), retrying in ${RETRY_DELAY_MS}ms:`,
+        error.message
+      );
+      await sleep(RETRY_DELAY_MS);
+    }
+  }
+  throw lastError;
 };
 
 // title/body copy for each outcome - kept in one place so the in-app

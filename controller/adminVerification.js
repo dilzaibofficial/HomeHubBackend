@@ -80,14 +80,21 @@ const approveVerification = (req, res) =>
     notifBody: (property) => `Your property "${property.title}" has been verified by our team.`,
   });
 
+// Rejecting always deletes the video (there is nowhere else useful for it
+// to live once an admin has decided it doesn't match) and always leaves the
+// property free to be resubmitted - the mobile app shows a "Retake Video"
+// action again as soon as verificationStatus flips to "rejected". There is
+// deliberately no separate "just delete, don't allow retake" action - a
+// property with an unresolved photo-verification video always needs to
+// land in one of "verified" or "rejected"/resubmittable, never a dead end.
 const rejectVerification = (req, res) =>
   applyVerificationDecision(req, res, {
     newStatus: "rejected",
     label: "no_match",
     labelSource: "admin_reject",
-    notifTitle: "Verification Rejected",
+    notifTitle: "Verification Rejected - Please Retake",
     notifBody: (property) =>
-      `Your verification video for "${property.title}" was reviewed and rejected. Please retake it and try again.`,
+      `Your verification video for "${property.title}" didn't match your photos closely enough. Please record a new video, filming the same areas slowly, and submit it again.`,
   });
 
 const datasetSummary = async (req, res) => {
