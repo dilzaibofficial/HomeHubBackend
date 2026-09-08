@@ -20,6 +20,13 @@ const {
   adminEditProperty,
   adminDeleteProperty,
 } = require("../controller/adminAuth");
+const {
+  listPendingVerifications,
+  approveVerification,
+  rejectVerification,
+  datasetSummary,
+  exportDatasetZip,
+} = require("../controller/adminVerification");
 
 router.route("/adminalluser").post(allUser);
 router.route("/verifyUser").post(verifyUser);
@@ -39,5 +46,11 @@ router.route("/unverifyUser").post(unverifyUser);
 router.route("/editProperty").post(adminEditProperty);
 router.route("/deleteProperty").post(adminDeleteProperty);
 
+// Property photo verification queue + internal dataset export
+router.route("/verificationQueue").post(listPendingVerifications);
+router.route("/approveVerification").post(approveVerification);
+router.route("/rejectVerification").post(rejectVerification);
+router.route("/datasetSummary").post(datasetSummary);
+router.route("/exportVerificationDataset").post(exportDatasetZip);
 
 module.exports = router;

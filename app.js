@@ -5,6 +5,7 @@ const cron = require("node-cron");
 const connectDB = require("./database/connect");
 const bodyParser = require("body-parser");
 const resetExpiredAgreements = require("./Utility/resetExpiredAgreements");
+const logMonthlyDatasetSummary = require("./Utility/logMonthlyDatasetBatch");
 const { ensureDefaultAdmin } = require("./controller/adminAuth");
 
 const app = express();
@@ -31,6 +32,7 @@ const credit_routes = require("./routes/credit");
 const admin_routes = require("./routes/admin");
 const notification_routes = require("./routes/notification");
 const chat_routes = require("./routes/chat");
+const verification_routes = require("./routes/verification");
 
 // Base Route
 app.get("/", (req, res) => {
@@ -45,6 +47,7 @@ app.use("/api/credit", credit_routes);
 app.use("/api/admin", admin_routes);
 app.use("/api/notification", notification_routes);
 app.use("/api/chat", chat_routes);
+app.use("/api/verification", verification_routes);
 
 // Server Start Function
 const start = async () => {
@@ -62,6 +65,11 @@ const start = async () => {
     // then every 30 minutes.
     resetExpiredAgreements();
     cron.schedule("*/30 * * * *", resetExpiredAgreements);
+
+    // Operator-visible log of how many labeled verification samples are
+    // ready to export - runs once at startup, then on the 1st of each month.
+    logMonthlyDatasetSummary();
+    cron.schedule("0 0 1 * *", logMonthlyDatasetSummary);
 
     // Listen on 0.0.0.0 to allow external (Mobile) requests
     app.listen(PORT, "0.0.0.0", () => {

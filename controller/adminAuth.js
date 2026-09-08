@@ -238,6 +238,7 @@ const adminDeleteProperty = async (req, res) => {
 };
 
 module.exports = {
+  requireAdmin,
   ensureDefaultAdmin,
   adminLogin,
   createAdmin,

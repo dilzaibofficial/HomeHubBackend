@@ -12,7 +12,7 @@ const notificationSchema = new mongoose.Schema(
     body: { type: String, required: true },
     type: {
       type: String,
-      enum: ["agreement_request", "negotiation", "handshake", "rejected", "payment", "agreement_pdf"],
+      enum: ["agreement_request", "negotiation", "handshake", "rejected", "payment", "agreement_pdf", "verification_result"],
       required: true,
     },
     property: {

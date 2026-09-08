@@ -132,7 +132,7 @@ const myProperty = async (req, res) => {
     // Fetch data from the database
     const myData = await Property.find(
       { propertyowner: req.body.propertyowner },
-      "_id title description type rent advance bachelor state city area address assest bedroom bathroom areaofhouse propertyowner propertySelling peoplesharing coordinate rented"
+      "_id title description type rent advance bachelor state city area address assest bedroom bathroom areaofhouse propertyowner propertySelling peoplesharing coordinate rented verificationStatus"
     )
     .populate("propertyowner")
     .sort({ _id: -1 })
@@ -1107,6 +1107,7 @@ const getPropertyById = async (req, res) => {
 };
 
 module.exports = {
+  notifyUser,
   createProperty,
   myProperty,
   freshRecommendation,

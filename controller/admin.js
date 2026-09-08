@@ -50,10 +50,11 @@ const allAnalytics = async (req, res) => {
     const totalProperty = await Property.countDocuments();
     const totalCredit = await Credit.countDocuments();
     const totalAgreement = await Agreement.countDocuments();
+    const pendingVerifications = await Property.countDocuments({ verificationStatus: "pending_review" });
 
     res
       .status(200)
-      .json({ totalUsers, totalProperty, totalCredit, totalAgreement });
+      .json({ totalUsers, totalProperty, totalCredit, totalAgreement, pendingVerifications });
   } catch (error) {
     console.error("Error verifying user:", error);
     res.status(500).json({ message: "Server error" });

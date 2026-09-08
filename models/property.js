@@ -98,6 +98,44 @@ const propertySchema = mongoose.Schema({
       default: null,
     },
   },
+  // --- Property photo verification (live video vs. uploaded photos) ---
+  verificationStatus: {
+    type: String,
+    enum: ["unverified", "pending_review", "verified", "rejected"],
+    default: "unverified",
+  },
+  verificationVideoUrl: {
+    type: String,
+    default: null,
+  },
+  verificationVideoPublicId: {
+    type: String,
+    default: null,
+  },
+  // Groups the VerificationSample rows produced by one submission attempt,
+  // so a later resubmission (after a rejection) doesn't mix its samples
+  // with the previous attempt's.
+  verificationAttemptId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null,
+  },
+  verificationScore: {
+    type: Number,
+    default: null,
+  },
+  verificationSubmittedAt: {
+    type: Date,
+    default: null,
+  },
+  verificationDecidedAt: {
+    type: Date,
+    default: null,
+  },
+  verificationDecisionSource: {
+    type: String,
+    enum: ["auto", "admin", null],
+    default: null,
+  },
 });
 
 const Property = mongoose.model("Property", propertySchema);

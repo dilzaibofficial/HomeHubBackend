@@ -34,5 +34,66 @@ try {
 }
 }
 
-module.exports = { uploadOnCloudinary };
+// Video variant of uploadOnCloudinary above - kept as a separate function
+// (rather than adding options to the existing one) so that function's
+// behavior for every existing image/PDF caller stays byte-for-byte
+// unchanged. Returns both the URL (to show the video) and the public_id
+// (needed later to delete it via deleteFromCloudinary).
+const uploadVideoOnCloudinary = async (localFilePath) => {
+  if (!localFilePath) return null;
+  try {
+    const response = await cloudinary.uploader.upload(localFilePath, {
+      resource_type: "video",
+    });
+    return { secureUrl: response.secure_url, publicId: response.public_id };
+  } catch (error) {
+    console.error("Error uploading video to Cloudinary:", error);
+    return null;
+  } finally {
+    // Unlike the image-upload path above, always clean up (success or
+    // failure) - videos are large enough that leaving them in /tmp across
+    // many verification attempts is a real disk-usage risk on a
+    // long-running server, not just a cosmetic leak.
+    try {
+      if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
+    } catch (cleanupError) {
+      console.error("Error cleaning up local video file:", cleanupError);
+    }
+  }
+};
+
+// Uploads an in-memory JPEG (base64, no data-URI prefix) - used for the
+// small representative video frames the verification service returns, so
+// they never need to touch disk on this server.
+const uploadImageBufferOnCloudinary = async (base64Jpeg, folder) => {
+  if (!base64Jpeg) return null;
+  try {
+    const response = await cloudinary.uploader.upload(`data:image/jpeg;base64,${base64Jpeg}`, {
+      resource_type: "image",
+      folder,
+    });
+    return { secureUrl: response.secure_url, publicId: response.public_id };
+  } catch (error) {
+    console.error("Error uploading image buffer to Cloudinary:", error);
+    return null;
+  }
+};
+
+const deleteFromCloudinary = async (publicId, resourceType = "image") => {
+  if (!publicId) return false;
+  try {
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    return true;
+  } catch (error) {
+    console.error("Error deleting from Cloudinary:", error);
+    return false;
+  }
+};
+
+module.exports = {
+  uploadOnCloudinary,
+  uploadVideoOnCloudinary,
+  uploadImageBufferOnCloudinary,
+  deleteFromCloudinary,
+};
 
