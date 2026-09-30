@@ -7,6 +7,7 @@ const bodyParser = require("body-parser");
 const resetExpiredAgreements = require("./Utility/resetExpiredAgreements");
 const logMonthlyDatasetSummary = require("./Utility/logMonthlyDatasetBatch");
 const { ensureDefaultAdmin } = require("./controller/adminAuth");
+const { wakeVerificationService } = require("./Utility/verificationServiceWarmup");
 
 const app = express();
 // Render assigns its own port via process.env.PORT - it must be used as-is.
@@ -37,6 +38,15 @@ const verification_routes = require("./routes/verification");
 // Base Route
 app.get("/", (req, res) => {
   res.send("Welcome to anonymous app - Backend is Live!");
+});
+
+// Whenever the app talks to this backend, make sure the separately-hosted
+// verification service is awake too (it sleeps independently on Render's
+// free tier). Fire-and-forget and debounced - never delays or fails the
+// actual request. See Utility/verificationServiceWarmup.js.
+app.use("/api", (req, res, next) => {
+  wakeVerificationService();
+  next();
 });
 
 // Routes Middleware
@@ -70,6 +80,11 @@ const start = async () => {
     // ready to export - runs once at startup, then on the 1st of each month.
     logMonthlyDatasetSummary();
     cron.schedule("0 0 1 * *", logMonthlyDatasetSummary);
+
+    // This backend just booted (usually because someone opened the app after
+    // it had been idle) - start the verification service booting too instead
+    // of waiting for the first API request to do it.
+    wakeVerificationService();
 
     // Listen on 0.0.0.0 to allow external (Mobile) requests
     app.listen(PORT, "0.0.0.0", () => {

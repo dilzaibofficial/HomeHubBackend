@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Property = require("../models/property");
 const VerificationSample = require("../models/VerificationSample");
 const { notifyUser } = require("./property");
+const { waitUntilVerificationServiceReady } = require("../Utility/verificationServiceWarmup");
 const {
   uploadVideoOnCloudinary,
   uploadImageBufferOnCloudinary,
@@ -11,7 +12,21 @@ const {
 
 const AUTO_VERIFY_THRESHOLD = Number(process.env.VERIFICATION_AUTO_VERIFY_THRESHOLD) || 0.8;
 const AUTO_REJECT_THRESHOLD = Number(process.env.VERIFICATION_AUTO_REJECT_THRESHOLD) || 0.35;
-const ML_SERVICE_TIMEOUT_MS = Number(process.env.ML_SERVICE_TIMEOUT_MS) || 45000;
+// Measured against the live Render free-tier service (0.1 CPU): a /verify
+// call takes ~35s for a short clip with 6 photos, and considerably longer
+// for a typical 20-30s phone video. The old 45s cap aborted those even
+// though the service was healthy, and then the retry piled a second copy of
+// the same job onto the same tiny CPU. Deliberately a new env var name so a
+// stale ML_SERVICE_TIMEOUT_MS=45000 already set on Render doesn't keep
+// applying.
+const ML_SERVICE_TIMEOUT_MS = Number(process.env.ML_VERIFY_TIMEOUT_MS) || 120000;
+// The mobile app gives up on this request after 150s in total, and part of
+// that is already spent uploading the video before this handler even runs -
+// so the whole call to the service (wake-up wait included) is capped well
+// under that, to always answer with a clean message instead of leaving the
+// app hanging on a dead connection.
+const VERIFY_BUDGET_MS = 110000;
+const MIN_ATTEMPT_MS = 20000;
 
 // Duplicates only the ownership-check portion of guardEditableProperty
 // (controller/property.js), deliberately not that function itself - it
@@ -48,7 +63,7 @@ const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 5000;
 
-const callMatchingServiceOnce = async (property) => {
+const callMatchingServiceOnce = async (property, timeoutMs) => {
   const baseUrl = process.env.ML_VERIFICATION_SERVICE_URL;
   const secret = process.env.ML_VERIFICATION_SERVICE_SECRET;
   if (!baseUrl || !secret) {
@@ -58,7 +73,7 @@ const callMatchingServiceOnce = async (property) => {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ML_SERVICE_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/verify`, {
       method: "POST",
@@ -104,11 +119,16 @@ const callMatchingServiceOnce = async (property) => {
   }
 };
 
-const callMatchingService = async (property) => {
+const callMatchingService = async (property, deadline) => {
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remaining = deadline - Date.now();
+    if (attempt > 1 && remaining < MIN_ATTEMPT_MS) break; // no time left for a meaningful retry
     try {
-      return await callMatchingServiceOnce(property);
+      return await callMatchingServiceOnce(
+        property,
+        Math.min(ML_SERVICE_TIMEOUT_MS, Math.max(remaining, MIN_ATTEMPT_MS))
+      );
     } catch (error) {
       lastError = error;
       if (!error.retryable || attempt === MAX_ATTEMPTS) break;
@@ -151,6 +171,7 @@ const submitVerification = async (req, res) => {
     return res.status(401).json({ message: "Authorization header missing" });
   }
 
+  const handlerStartedAt = Date.now();
   let property;
   let uploadedVideo = null;
 
@@ -170,6 +191,12 @@ const submitVerification = async (req, res) => {
         .json({ message: "A previous video is already awaiting admin review for this property" });
     }
 
+    // Start waking the matching service (if it has gone to sleep) right now,
+    // in parallel with the Cloudinary upload below, so its cold boot overlaps
+    // with work we have to do anyway. Never rejects; awaited just before the
+    // service is actually called.
+    const matchingServiceReady = waitUntilVerificationServiceReady();
+
     uploadedVideo = await uploadVideoOnCloudinary(req.file.path);
     if (!uploadedVideo) {
       return res.status(502).json({ message: "Could not upload the video. Please try again." });
@@ -184,7 +211,8 @@ const submitVerification = async (req, res) => {
 
     let mlResult;
     try {
-      mlResult = await callMatchingService(property);
+      await matchingServiceReady;
+      mlResult = await callMatchingService(property, handlerStartedAt + VERIFY_BUDGET_MS);
     } catch (error) {
       // A technical failure (service down/cold-starting/timeout) is not the
       // same as "the user's video didn't match" - roll back to a clean
