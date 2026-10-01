@@ -28,6 +28,7 @@ const {
   exportDatasetZip,
   deleteDataset,
 } = require("../controller/adminVerification");
+const { demoSeedStatus, seedDemoProperties, removeDemoProperties } = require("../controller/adminSeed");
 
 router.route("/adminalluser").post(allUser);
 router.route("/verifyUser").post(verifyUser);
@@ -54,5 +55,10 @@ router.route("/rejectVerification").post(rejectVerification);
 router.route("/datasetSummary").post(datasetSummary);
 router.route("/exportVerificationDataset").post(exportDatasetZip);
 router.route("/deleteDataset").post(deleteDataset);
+
+// Demo listings for client demos (admin panel > Properties > "Seed demo data")
+router.route("/demoSeedStatus").post(demoSeedStatus);
+router.route("/seedDemoProperties").post(seedDemoProperties);
+router.route("/removeDemoProperties").post(removeDemoProperties);
 
 module.exports = router;
